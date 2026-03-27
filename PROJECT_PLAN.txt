@@ -1,0 +1,329 @@
+SeenShow Downloader — Complete Project Plan
+============================================
+
+1. Overview
+-----------
+A standalone Windows .exe GUI application that downloads DRM-protected videos
+from seenshow.com. It handles the full pipeline that StreamFab cannot: Keycloak
+OAuth authentication, DRMtoday Widevine license acquisition, encrypted stream
+download, decryption, and muxing — all behind a simple paste-URL-and-click
+interface.
+
+
+2. Tech Stack
+-------------
+Layer        | Technology              | Reason
+-------------|-------------------------|----------------------------------------
+Language     | Python 3.12+            | Existing working code, rich ecosystem
+UI           | customtkinter           | Modern dark look, pure Python, PyInstaller-compatible
+HTTP         | requests                | Lightweight, proven
+DRM          | pywidevine              | Standard Widevine CDM library
+Download     | yt-dlp (Python library) | Native progress hooks, no extra binary
+Decrypt      | mp4decrypt (Bento4)     | Bundled binary, ~1MB
+Mux          | ffmpeg                  | Bundled binary, ~80MB
+Packaging    | PyInstaller (onefile)   | Single exe, no installer needed
+Config       | JSON in %APPDATA%       | Survives updates
+Update       | GitHub Releases API     | Batch-script exe swap
+
+
+3. Architecture
+---------------
+seenshow-gui/
+├── src/
+│   ├── main.py                    # Entry point (freeze_support, cleanup, launch)
+│   ├── app.py                     # Controller (wires UI <-> config <-> core)
+│   │
+│   ├── core/                      # Business logic (no UI dependencies)
+│   │   ├── constants.py           # Version, URLs, user agent
+│   │   ├── auth.py                # SeenAuth — Keycloak OAuth PKCE flow
+│   │   ├── api.py                 # SeenAPI — media details, episodes, DRM tokens
+│   │   ├── drm.py                 # Widevine key retrieval from DRMtoday
+│   │   ├── downloader.py          # Download, decrypt, mux pipeline
+│   │   └── url_parser.py          # Parse episode/series URLs
+│   │
+│   ├── services/                  # Infrastructure layer
+│   │   ├── config.py              # JSON config in %APPDATA%/SeenShowDL/
+│   │   ├── binary_locator.py      # Find bundled ffmpeg/mp4decrypt
+│   │   ├── download_manager.py    # Threaded queue-based batch downloader
+│   │   └── updater.py             # Self-update via GitHub Releases
+│   │
+│   ├── ui/                        # GUI layer (customtkinter)
+│   │   ├── theme.py               # Colors, fonts, dimensions
+│   │   ├── main_window.py         # Root window, header bar, frame switching
+│   │   ├── login_frame.py         # Credentials form
+│   │   ├── download_frame.py      # URL input, episode list, progress
+│   │   └── settings_frame.py      # Output dir, WVD file, account, updates
+│   │
+│   └── assets/
+│       └── icon.ico               # App icon
+│
+├── binaries/                      # Windows binaries (not in git, downloaded by build)
+│   ├── ffmpeg.exe                 # ~80MB
+│   └── mp4decrypt.exe             # ~1MB
+│
+├── build/
+│   ├── build.py                   # Downloads binaries + runs PyInstaller
+│   └── seenshow_dl.spec           # PyInstaller spec file
+│
+├── requirements.txt
+└── run.py                         # Dev launcher (runs from source)
+
+
+4. Module Design
+----------------
+
+4.1 core/auth.py — SeenAuth
+  - Full Keycloak OAuth PKCE flow via NextAuth
+  - Flow: CSRF token -> POST signin -> GET Keycloak login page -> POST
+    credentials -> follow callback -> extract accessToken from session
+  - Accepts on_status callback for UI status updates
+  - Raises AuthenticationError with user-friendly messages
+  - All requests have 30s timeouts
+
+4.2 core/api.py — SeenAPI
+  - get_media_detail(media_id) -> full media data with seasons/episodes
+  - get_episode_drm_token(episode_id) -> upfrontToken, MPD URL, key IDs
+  - find_episode(media_detail, episode_id) -> single episode dict
+  - get_all_episodes(media_id) -> (title, [episodes]) flat list across all
+    seasons, sorted by order
+
+4.3 core/drm.py — Widevine Key Retrieval
+  - Fetches MPD manifest, extracts Widevine PSSH
+  - Loads WVD device file via pywidevine
+  - Generates license challenge, sends to DRMtoday with custom headers:
+      x-dt-auth-token: upfrontToken JWT
+      x-dt-custom-data: base64({userId, sessionId, merchant})
+  - Parses license response, returns [(kid, key)] tuples
+
+4.4 core/downloader.py — Download Pipeline
+  - download_encrypted() — uses yt-dlp Python API with progress_hooks for
+    real-time percentage
+  - decrypt_file() — calls mp4decrypt via subprocess (resolved by binary_locator)
+  - mux_output() — calls ffmpeg via subprocess
+  - download_episode() — orchestrates the full pipeline:
+    metadata -> keys -> download -> decrypt -> mux -> cleanup
+  - Accepts progress_cb(message, percent) and cancel_check() callables
+  - Returns DownloadResult(success, output_path, error)
+  - All subprocesses use CREATE_NO_WINDOW flag on Windows
+
+4.5 core/url_parser.py
+  - Episode URL: seenshow.com/media/{id}/episode/{id}/play
+    -> ParsedURL("episode", mid, eid)
+  - Series URL: seenshow.com/media/{id}
+    -> ParsedURL("series", mid, None)
+  - Raises ValueError with example URLs on invalid input
+
+4.6 services/config.py
+  - Stores config in %APPDATA%/SeenShowDL/config.json
+    (Linux: ~/.config/SeenShowDL/)
+    output_dir, auto_update, last_update_check
+  - Credential helpers: save_credentials(), get_credentials(), clear_credentials()
+  - Password stored as base64 (casual protection — tied to user's own machine)
+  - Auto-creates directory on first use
+
+4.7 services/binary_locator.py
+  - When frozen (PyInstaller): looks in sys._MEIPASS/binaries/
+  - When from source: looks in project_root/binaries/
+  - Falls back to system PATH
+
+4.8 services/download_manager.py
+  - Accepts list of EpisodeTask objects
+  - Runs downloads sequentially in a background threading.Thread
+  - Communicates via queue.Queue[StatusUpdate]
+  - StatusUpdate: episode_id, phase, progress (0-1), message, error
+  - Phases: queued -> downloading -> decrypting -> muxing -> done/error/cancelled
+  - Cancel support via threading.Event checked between phases
+  - Emits batch_done when all tasks complete
+
+4.9 services/updater.py
+  - check_for_update() -> queries api.github.com/repos/{repo}/releases/latest,
+    compares version tags
+  - download_update(url) -> streams exe to %TEMP% with progress callback
+  - apply_update(new_exe) -> writes a batch script that:
+      1. Waits 2s for current process to exit
+      2. Renames current exe to .old
+      3. Moves new exe into place
+      4. Launches new exe
+      5. Deletes itself
+  - cleanup_old_exe() -> called on startup, deletes .old leftover
+
+
+5. UI Layout
+------------
+
+5.1 Main Window (860x620)
++--------------------------------------------------------------+
+|  SeenShow Downloader  v1.0.0                     [Settings]  |
++--------------------------------------------------------------+
+|                                                              |
+|                      [ ACTIVE FRAME ]                        |
+|                                                              |
++--------------------------------------------------------------+
+
+5.2 Login Frame
++--------------------------------------------------------------+
+|                                                              |
+|                SeenShow Downloader                           |
+|           Sign in to your SeenShow account                   |
+|                                                              |
+|    Email:    [______________________________]                |
+|    Password: [______________________________]                |
+|                                                              |
+|    [x] Remember credentials                                  |
+|                                                              |
+|              [    Sign In    ]                                |
+|                                                              |
+|    Connecting...                                             |
++--------------------------------------------------------------+
+
+5.3 Download Frame
++--------------------------------------------------------------+
+| URL: [_________________________________________]  [Fetch]    |
+|                                                              |
+| Wadi Misan                                                   |
+| +----------------------------------------------------------+ |
+| | [x] Episode 1 - The Beginning  (23:15)          Done     | |
+| | [x] Episode 2 - The River      (22:40)    Downloading    | |
+| | [x] Episode 3 - The Mountain   (23:33)         Queued    | |
+| | [ ] Episode 4 - The Forest     (24:01)                   | |
+| | ...                                                      | |
+| +----------------------------------------------------------+ |
+|                                                              |
+| [Select All] [Deselect All]  [Download Selected]    [Cancel] |
+| Downloading video... 45%                                     |
+| [=============>                                            ] |
++--------------------------------------------------------------+
+
+5.4 Settings Frame
++--------------------------------------------------------------+
+| Settings                                            [Back]   |
+|                                                              |
+| Output Directory:                                            |
+| [C:\Users\...\Downloads\SeenShow           ]  [Browse]       |
+|                                                              |
+|                                                              |
+| Account: info@fitrahmedia.nl               [Sign Out]        |
+|                                                              |
+| [Save Settings]                                              |
+| Settings saved.                                              |
+|                                                              |
+| SeenShow Downloader v1.0.0  Up to date  [Check for Updates] |
++--------------------------------------------------------------+
+
+
+6. Threading Model
+------------------
+Main Thread (tkinter)              Background Thread
+      |                                  |
+      +-- on_fetch() ------------------>| fetch episode list from API
+      |<-- after(0, _populate) ---------|
+      |                                  |
+      +-- on_download() --------------->| DownloadManager.start(tasks)
+      |                                  |-- for each episode:
+      |                                  |     get DRM token
+      |                                  |     get Widevine keys
+      |                                  |     yt-dlp download video
+      |                                  |     yt-dlp download audio
+      |                                  |     mp4decrypt video
+      |                                  |     mp4decrypt audio
+      |                                  |     ffmpeg mux
+      |                                  |     queue.put(StatusUpdate)
+      |<-- after(100ms, poll_queue) ----|
+      |    update row status + bar       |
+      |                                  |
+      +-- on_cancel() ---------------->| cancel_event.set()
+      |                                  |-- checks between phases
+      |                                  |-- terminates subprocess
+
+Communication is exclusively through queue.Queue. The UI thread never touches
+thread state directly. The background thread never touches tkinter widgets
+directly.
+
+
+7. Self-Update Mechanism
+------------------------
+1. GET api.github.com/repos/{repo}/releases/latest
+2. Compare tag_name (e.g. "v1.2.0") with local __version__
+3. If newer:
+   a. Show dialog: "v1.2.0 available. Update now?"
+   b. Download .exe asset to %TEMP%/SeenShowDL_update.exe
+   c. Write seenshow_update.bat:
+        @echo off
+        timeout /t 2 /nobreak >nul
+        del "SeenShowDL.exe.old" 2>nul
+        move /y "SeenShowDL.exe" "SeenShowDL.exe.old"
+        move /y "%TEMP%\SeenShowDL_update.exe" "SeenShowDL.exe"
+        start "" "SeenShowDL.exe"
+        del "%~f0"
+   d. Launch bat, exit current process
+4. On next startup: delete .old file
+
+User data in %APPDATA% is never touched by updates.
+
+
+8. Data Persistence
+-------------------
+%APPDATA%/SeenShowDL/
+└── config.json
+    {
+      "username": "user@example.com",
+      "password_b64": "base64...",
+      "remember_credentials": true,
+      "output_dir": "C:\\Users\\...\\Downloads\\SeenShow",
+      "auto_update": true,
+      "last_update_check": "2026-03-27"
+    }
+
+
+9. Build Pipeline
+-----------------
+On Windows:
+
+    pip install -r requirements.txt
+    python build/build.py
+
+build.py does:
+  1. Downloads ffmpeg.exe (~80MB) from BtbN/FFmpeg-Builds
+  2. Downloads mp4decrypt.exe (~1MB) from Bento4
+  3. Runs PyInstaller with seenshow_dl.spec
+  4. Output: dist/SeenShowDL.exe (single file, no console)
+
+The spec bundles:
+  - All Python code + dependencies (customtkinter, pywidevine, yt-dlp, requests)
+  - binaries/ffmpeg.exe and binaries/mp4decrypt.exe
+  - customtkinter data files (themes)
+  - App icon
+
+
+10. DRM Pipeline (per episode)
+------------------------------
+ 1. API: GET /{mediaId}/detail           -> episode metadata, fileUrl
+ 2. API: POST /episodes/{id}/drm-token   -> upfrontToken, MPD URL, userId,
+                                            sessionId, merchant
+ 3. HTTP: GET manifest.mpd               -> extract Widevine PSSH from XML
+ 4. pywidevine: generate license challenge from PSSH + WVD device
+ 5. HTTP: POST lic.drmtoday.com/license-proxy-widevine/cenc/
+          Headers: x-dt-auth-token, x-dt-custom-data
+          Body: challenge bytes
+          -> parse license response -> content keys [(kid, key)]
+ 6. yt-dlp: download bestvideo -> *_video_enc.mp4
+ 7. yt-dlp: download bestaudio -> *_audio_enc.m4a
+ 8. mp4decrypt --key kid:key   -> *_video_dec.mp4, *_audio_dec.m4a
+ 9. ffmpeg -c copy             -> final.mp4
+10. cleanup temp files
+
+
+11. How to Run
+--------------
+From source (dev/testing):
+
+    cd seenshow-gui
+    python -m venv venv
+    venv\Scripts\pip install -r requirements.txt     # Windows
+    ./venv/bin/pip install -r requirements.txt        # Linux
+    python run.py
+
+As built exe (end user):
+  1. Double-click SeenShowDL.exe
+  2. Sign in with SeenShow credentials
+  4. Paste URL -> Fetch -> Download Selected
