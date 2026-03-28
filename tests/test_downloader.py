@@ -26,9 +26,7 @@ class TestSafeFilename:
 
     def test_arabic(self):
         result = safe_filename("وادي ميسان", "الحلقة 13")
-        # Arabic is transliterated to ASCII for Windows tool compatibility
-        assert "13" in result
-        assert " - " in result
+        assert result == "وادي ميسان - الحلقة 13"
 
 
 class TestCheckCancel:

@@ -45,7 +45,6 @@ a = Analysis(
         "customtkinter",
         "packaging",
         "packaging.version",
-        "unidecode",
         "Crypto",
         "Crypto.Cipher",
         "Crypto.Cipher.AES",

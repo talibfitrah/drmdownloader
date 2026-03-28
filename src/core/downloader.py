@@ -3,6 +3,7 @@
 import os
 import re
 import subprocess
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
@@ -36,13 +37,8 @@ class DownloadResult:
 
 
 def safe_filename(media_title: str, ep_name: str) -> str:
-    # Transliterate Arabic/Unicode to ASCII for max compatibility with
-    # external tools (mp4decrypt, ffmpeg) on Windows
-    try:
-        from unidecode import unidecode
-        name = unidecode(f"{media_title} - {ep_name}")
-    except ImportError:
-        name = f"{media_title} - {ep_name}"
+    """Build a filesystem-safe filename preserving original Unicode (Arabic etc.)."""
+    name = f"{media_title} - {ep_name}"
     name = re.sub(r'[<>:"/\\|?*]', '', name).strip()
     name = re.sub(r'\s+', ' ', name)
     if len(name) > _MAX_FILENAME_LEN:
@@ -58,6 +54,9 @@ def _check_cancel(cancel_check: CancelCheck):
 def _run_subprocess(cmd: list[str], cancel_check: CancelCheck):
     """Run a subprocess with cancellation support via Popen + polling.
 
+    Pipes are drained in background threads to prevent deadlock when
+    subprocess output (e.g. ffmpeg progress) exceeds the OS pipe buffer.
+
     NOTE: mp4decrypt requires DRM keys on the command line (--key kid:key).
     The tool does not support key files or stdin for key input. Keys will be
     visible in the process list while the subprocess runs. This is a known
@@ -67,6 +66,22 @@ def _run_subprocess(cmd: list[str], cancel_check: CancelCheck):
         cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         creationflags=_NO_WINDOW,
     )
+
+    stdout_chunks: list[bytes] = []
+    stderr_chunks: list[bytes] = []
+
+    def _drain(stream, buf):
+        while True:
+            chunk = stream.read(4096)
+            if not chunk:
+                break
+            buf.append(chunk)
+
+    tout = threading.Thread(target=_drain, args=(proc.stdout, stdout_chunks), daemon=True)
+    terr = threading.Thread(target=_drain, args=(proc.stderr, stderr_chunks), daemon=True)
+    tout.start()
+    terr.start()
+
     try:
         while proc.poll() is None:
             if cancel_check and cancel_check():
@@ -81,9 +96,13 @@ def _run_subprocess(cmd: list[str], cancel_check: CancelCheck):
                 proc.wait(timeout=0.5)
             except subprocess.TimeoutExpired:
                 pass
+
+        tout.join(timeout=5)
+        terr.join(timeout=5)
+
         if proc.returncode != 0:
-            stderr = proc.stderr.read().decode(errors="replace").strip()
-            stdout = proc.stdout.read().decode(errors="replace").strip()
+            stderr = b"".join(stderr_chunks).decode(errors="replace").strip()
+            stdout = b"".join(stdout_chunks).decode(errors="replace").strip()
             detail = stderr or stdout or "no output"
             cmd_name = os.path.basename(cmd[0])
             raise RuntimeError(
