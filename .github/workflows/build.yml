@@ -54,6 +54,24 @@ jobs:
           pip install pytest
           python -m pytest tests/ -v
 
+      - name: Inject CDM device
+        env:
+          WVD_BLOB: ${{ secrets.WVD_BLOB }}
+        shell: python
+        run: |
+          import os
+          blob = os.environ["WVD_BLOB"]
+          path = os.path.join("src", "core", "drm.py")
+          with open(path, "r") as f:
+              code = f.read()
+          code = code.replace(
+              '_EMBEDDED_WVD = os.environ.get("WVD_BLOB", "")',
+              f'_EMBEDDED_WVD = "{blob}"',
+          )
+          with open(path, "w") as f:
+              f.write(code)
+          print(f"Injected {len(blob)} chars into drm.py")
+
       - name: Build EXE with PyInstaller
         run: python -m PyInstaller build/seenshow_dl.spec --noconfirm
 
