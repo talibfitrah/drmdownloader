@@ -23,6 +23,8 @@ import requests
 
 PROJECT_ROOT = Path(__file__).parent.parent
 BINARIES_DIR = PROJECT_ROOT / "binaries"
+DIST_DIR = PROJECT_ROOT / "dist"
+WORK_DIR = PROJECT_ROOT / "build" / "pyinstaller"
 
 FFMPEG_URL = "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip"
 BENTO4_URL = "https://www.bok.net/Bento4/binaries/Bento4-SDK-1-6-0-641.x86_64-microsoft-win32.zip"
@@ -91,15 +93,52 @@ def ensure_mp4decrypt():
     print("[ok] mp4decrypt.exe extracted")
 
 
-def run_pyinstaller():
-    print("\n[build] Running PyInstaller...")
-    spec = PROJECT_ROOT / "build" / "seenshow_dl.spec"
+def smoke_test_imports():
+    """Verify the critical frozen-build imports resolve before packaging."""
+    print("\n[check] Verifying critical imports...")
+    code = (
+        "import importlib, sys; "
+        f"sys.path.insert(0, {str(PROJECT_ROOT)!r}); "
+        "importlib.import_module('src.core.drm'); "
+        "importlib.import_module('src.core.downloader')"
+    )
     subprocess.run(
-        [sys.executable, "-m", "PyInstaller", str(spec), "--noconfirm"],
+        [sys.executable, "-c", code],
         cwd=str(PROJECT_ROOT),
         check=True,
     )
-    print("\n[done] Build complete. Output in dist/SeenShowDL.exe")
+    print("[ok] Critical imports resolved")
+
+
+def clean_build_dirs():
+    """Remove stale PyInstaller outputs so analysis is always fresh."""
+    for path in [DIST_DIR, WORK_DIR]:
+        if path.exists():
+            print(f"[clean] Removing {path.relative_to(PROJECT_ROOT)}")
+            shutil.rmtree(path)
+
+
+def run_pyinstaller():
+    print("\n[build] Running PyInstaller...")
+    spec = PROJECT_ROOT / "build" / "seenshow_dl.spec"
+    clean_build_dirs()
+    subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "PyInstaller",
+            str(spec),
+            "--noconfirm",
+            "--clean",
+            "--distpath",
+            str(DIST_DIR),
+            "--workpath",
+            str(WORK_DIR),
+        ],
+        cwd=str(PROJECT_ROOT),
+        check=True,
+    )
+    print(f"\n[done] Build complete. Output in {DIST_DIR}")
 
 
 def main():
@@ -111,6 +150,7 @@ def main():
     BINARIES_DIR.mkdir(exist_ok=True)
     ensure_ffmpeg()
     ensure_mp4decrypt()
+    smoke_test_imports()
     run_pyinstaller()
 
 

@@ -23,6 +23,10 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
+      - name: Smoke test critical imports
+        run: |
+          python -c "import importlib; importlib.import_module('src.core.drm'); importlib.import_module('src.core.downloader')"
+
       - name: Download ffmpeg
         shell: pwsh
         run: |
@@ -76,8 +80,13 @@ jobs:
               f.write(code)
           print(f"Injected {len(blob)} chars into drm.py")
 
-      - name: Build EXE with PyInstaller
-        run: python -m PyInstaller build/seenshow_dl.spec --noconfirm
+      - name: Re-run smoke test after CDM injection
+        if: github.event_name != 'pull_request'
+        run: |
+          python -c "import importlib; importlib.import_module('src.core.drm'); importlib.import_module('src.core.downloader')"
+
+      - name: Build EXE
+        run: python build/build.py
 
       - name: Verify EXE exists
         run: |
