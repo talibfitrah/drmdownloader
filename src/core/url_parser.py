@@ -21,7 +21,7 @@ def parse_seenshow_url(url: str) -> ParsedURL:
     url = url.strip()
 
     parsed = urlparse(url)
-    host = parsed.netloc.lower()
+    host = (parsed.hostname or "").lower()
     if host not in ALLOWED_HOSTS:
         raise ValueError(
             "Invalid URL. Expected a seenshow.com URL:\n"

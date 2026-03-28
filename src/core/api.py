@@ -29,7 +29,7 @@ class SeenAPI:
     def find_episode(self, media_detail: dict, episode_id: int) -> dict | None:
         for season in media_detail.get("seasons", []):
             for ep in season.get("episodes", []):
-                if ep["id"] == episode_id:
+                if ep.get("id") == episode_id:
                     return ep
         return None
 

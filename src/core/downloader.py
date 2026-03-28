@@ -10,7 +10,6 @@ from typing import Callable
 import yt_dlp
 
 from ..services.binary_locator import get_binary
-from .drm import get_widevine_keys
 
 # Progress callback signature: (phase_key: str, pct: float, extra: dict)
 # phase_key is an i18n key; extra may contain speed, eta_secs, etc.
@@ -238,7 +237,8 @@ def download_episode(
         output_prefix = str(Path(output_dir) / fname)
         final_output = f"{output_prefix}.mp4"
 
-        if Path(final_output).exists():
+        final_path = Path(final_output)
+        if final_path.exists() and final_path.stat().st_size > 0:
             return DownloadResult(True, output_path=final_output)
 
         _check_cancel(cancel_check)
@@ -257,6 +257,7 @@ def download_episode(
         if drm_token.get("isProtected"):
             if progress_cb:
                 progress_cb("getting_keys", 0.03, {})
+            from .drm import get_widevine_keys
             keys = get_widevine_keys(mpd_url, drm_token)
 
             # download_encrypted uses weighted progress: video 0-50%, audio 50-75%

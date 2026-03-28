@@ -32,14 +32,18 @@ def download_file(url: str, dest: Path):
     """Download a file with streaming, timeouts, and atomic write."""
     print(f"  Downloading {url}")
     tmp_fd, tmp_path = tempfile.mkstemp(dir=dest.parent, suffix=".tmp")
+    fd_owned = False
     try:
         resp = requests.get(url, stream=True, timeout=(30, 300))
         resp.raise_for_status()
         with os.fdopen(tmp_fd, "wb") as f:
+            fd_owned = True
             for chunk in resp.iter_content(chunk_size=65536):
                 f.write(chunk)
         shutil.move(tmp_path, dest)
     except requests.RequestException as e:
+        if not fd_owned:
+            os.close(tmp_fd)
         try:
             os.unlink(tmp_path)
         except OSError:

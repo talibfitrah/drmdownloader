@@ -17,7 +17,8 @@ SERVICE_NAME = "SeenShowDL"
 
 def _app_data_dir() -> Path:
     if os.name == "nt":
-        base = Path(os.environ.get("APPDATA", Path.home()))
+        appdata = os.environ.get("APPDATA")
+        base = Path(appdata) if appdata else Path.home() / ".config"
     else:
         base = Path.home() / ".config"
     d = base / "SeenShowDL"
@@ -28,6 +29,7 @@ def _app_data_dir() -> Path:
 APP_DATA_DIR = _app_data_dir()
 CONFIG_FILE = APP_DATA_DIR / "config.json"
 LOG_DIR = APP_DATA_DIR / "logs"
+LOG_DIR.mkdir(parents=True, exist_ok=True)
 
 _DEFAULTS = {
     "username": "",
@@ -75,8 +77,12 @@ class Config:
                 del self._data["password_b64"]
                 self.save()
                 logger.info("Migrated legacy password to OS keyring")
-            except Exception:
-                logger.warning("Failed to migrate legacy password to keyring")
+            except Exception as e:
+                logger.warning("Failed to migrate legacy password to keyring: %s", e)
+                # Remove sensitive data from config even on failure
+                del self._data["password_b64"]
+                self._data["password_migration_failed"] = True
+                self.save()
 
     def save(self):
         try:
@@ -110,18 +116,25 @@ class Config:
         return user, pw
 
     def save_credentials(self, username: str, password: str) -> bool:
+        old_username = self._data.get("username", "")
         self._data["username"] = username
+        try:
+            self.save()
+        except OSError as e:
+            self._data["username"] = old_username
+            logger.warning("Failed to save config with username: %s", e)
+            return False
         if keyring is None:
             logger.warning("Keyring not available — password cannot be persisted")
-            self.save()
             return False
         try:
             keyring.set_password(SERVICE_NAME, username, password)
         except Exception as e:
             logger.warning("Failed to store password in keyring: %s", e)
+            # Revert username since keyring failed
+            self._data["username"] = old_username
             self.save()
             return False
-        self.save()
         return True
 
     def clear_credentials(self):

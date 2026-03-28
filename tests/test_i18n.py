@@ -60,10 +60,15 @@ class TestShapeIfArabic:
         assert shape_if_arabic("Hello World") == "Hello World"
 
     def test_arabic_shaped(self):
-        result = shape_if_arabic("الحلقة")
+        original = "الحلقة"
+        result = shape_if_arabic(original)
         assert result != ""
         # Shaped text should differ from raw input (connected forms)
-        assert len(result) > 0
+        assert result != original, "shape_if_arabic should modify Arabic text"
+        # Verify at least one codepoint differs
+        assert any(
+            ord(a) != ord(b) for a, b in zip(result, original)
+        ), "shaped result should contain different codepoints"
 
     def test_empty_string(self):
         assert shape_if_arabic("") == ""

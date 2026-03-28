@@ -58,10 +58,10 @@ class MainWindow(ctk.CTk):
         """Clean shutdown: cancel downloads, wait for threads, then destroy."""
         try:
             dl_frame = self.frames.get("download")
-            dm = getattr(dl_frame, "_dm", None) if dl_frame else None
-            if dm and dm.is_running:
-                dm.cancel()
-                dm.join(timeout=5.0)
+            if dl_frame:
+                stopped = dl_frame.cancel_and_wait(timeout=5.0)
+                if not stopped:
+                    logger.warning("Download thread did not stop within timeout")
         except Exception:
             logger.warning("Error during shutdown cleanup", exc_info=True)
         finally:

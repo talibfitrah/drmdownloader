@@ -55,12 +55,16 @@ jobs:
           python -m pytest tests/ -v
 
       - name: Inject CDM device
+        if: github.event_name != 'pull_request'
         env:
           WVD_BLOB: ${{ secrets.WVD_BLOB }}
         shell: python
         run: |
-          import os
-          blob = os.environ["WVD_BLOB"]
+          import os, sys
+          blob = os.environ.get("WVD_BLOB", "")
+          if not blob:
+              print("ERROR: WVD_BLOB secret is empty or missing.")
+              sys.exit(1)
           path = os.path.join("src", "core", "drm.py")
           with open(path, "r") as f:
               code = f.read()

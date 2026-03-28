@@ -4,7 +4,6 @@ import tkinter as tk
 import customtkinter as ctk
 
 from . import theme as T
-from ..core.auth import SeenAuth, AuthenticationError
 
 
 class LoginFrame(tk.Frame):
@@ -111,6 +110,7 @@ class LoginFrame(tk.Frame):
             pass
 
     def _do_auth(self, email: str, password: str, remember: bool):
+        from ..core.auth import SeenAuth, AuthenticationError
 
         i = self.i
 

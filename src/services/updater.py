@@ -134,6 +134,14 @@ def download_update(url: str, expected_sha256: str = "", progress_cb=None) -> st
     return str(dest)
 
 
+def _batch_escape(path: str) -> str:
+    """Escape a path for safe use inside a batch script."""
+    path = path.replace("%", "%%")
+    for ch in "^&|<>!":
+        path = path.replace(ch, f"^{ch}")
+    return path
+
+
 def apply_update(new_exe_path: str):
     """Replace current exe with the new one via a helper batch script."""
     if not getattr(sys, "frozen", False):
@@ -144,13 +152,14 @@ def apply_update(new_exe_path: str):
             f"Update file not found: {new_exe_path}. Cannot apply update."
         )
 
-    current_exe = sys.executable
-    old_exe = current_exe + ".old"
+    current_exe = _batch_escape(sys.executable)
+    old_exe = _batch_escape(sys.executable + ".old")
+    new_exe_path = _batch_escape(new_exe_path)
 
     bat = Path(tempfile.gettempdir()) / "seenshow_update.bat"
     bat.write_text(
         f'@echo off\r\n'
-        f'setlocal\r\n'
+        f'setlocal DisableDelayedExpansion\r\n'
         f'\r\n'
         f'rem Wait for the current process to release the exe\r\n'
         f'set RETRIES=0\r\n'

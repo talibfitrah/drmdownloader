@@ -440,6 +440,18 @@ class DownloadFrame(tk.Frame):
         elif terminal == "batch_error":
             self.progress_label.configure(text=i.t("error"), fg=T.TEXT_ERROR)
 
+    def cancel_and_wait(self, timeout: float = 5.0) -> bool:
+        """Cancel any running download and wait for the thread to stop.
+
+        Returns True if the thread stopped within the timeout.
+        """
+        dm = self._dm
+        if dm is None or not dm.is_running:
+            return True
+        dm.cancel()
+        dm.join(timeout=timeout)
+        return not dm.is_running
+
     def _on_cancel(self):
         if self._dm:
             self._dm.cancel()

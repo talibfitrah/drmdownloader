@@ -1,15 +1,19 @@
 # -*- mode: python ; coding: utf-8 -*-
 """PyInstaller spec file for SeenShow Downloader."""
 
-import os
 from pathlib import Path
+from PyInstaller.utils.hooks import collect_data_files, collect_submodules, collect_all
 
 block_cipher = None
 project_root = Path(SPECPATH).parent
 
-# Collect customtkinter data files (required)
-from PyInstaller.utils.hooks import collect_data_files
+# Collect all customtkinter data files (themes, assets)
 ctk_datas = collect_data_files("customtkinter")
+
+# Force-collect all submodules for packages with deferred/dynamic imports
+all_hidden = []
+for pkg in ["src", "pywidevine", "yt_dlp", "arabic_reshaper", "bidi"]:
+    all_hidden += collect_submodules(pkg)
 
 a = Analysis(
     [str(project_root / "src" / "main.py")],
@@ -21,38 +25,10 @@ a = Analysis(
     datas=[
         *ctk_datas,
     ],
-    hiddenimports=[
-        # App modules (deferred imports not traced by PyInstaller)
-        "src.core.auth",
-        "src.core.api",
-        "src.core.drm",
-        "src.core.downloader",
-        "src.core.url_parser",
-        "src.core.constants",
-        "src.services.config",
-        "src.services.binary_locator",
-        "src.services.download_manager",
-        "src.services.updater",
-        "src.ui.i18n",
-        "src.ui.theme",
-        "src.ui.main_window",
-        "src.ui.login_frame",
-        "src.ui.download_frame",
-        "src.ui.settings_frame",
-        "src.app",
-        # Third-party
-        "pywidevine",
-        "pywidevine.cdm",
-        "pywidevine.device",
-        "pywidevine.pssh",
-        "pywidevine.license_protocol_pb2",
-        "yt_dlp",
+    hiddenimports=all_hidden + [
         "customtkinter",
         "packaging",
         "packaging.version",
-        "arabic_reshaper",
-        "bidi",
-        "bidi.algorithm",
         "unidecode",
     ],
     hookspath=[],
@@ -81,7 +57,7 @@ exe = EXE(
     upx=True,
     upx_exclude=[],
     runtime_tmpdir=None,
-    console=True,            # Show console for debugging
+    console=True,            # Show console for debugging (set False for release)
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,

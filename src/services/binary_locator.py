@@ -74,7 +74,7 @@ def get_binary(name: str) -> str:
     exe_name = f"{name}.exe" if sys.platform == "win32" else name
     path = base / exe_name
 
-    if path.exists():
+    if path.is_file():
         abs_path = str(path.resolve())
         if _verify_binary(abs_path, name):
             return abs_path

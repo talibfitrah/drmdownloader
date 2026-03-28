@@ -32,9 +32,10 @@ class TestDownloadManager:
         dm = DownloadManager(api=mock_api, output_dir="/tmp")
 
         mock_result = DownloadResult(success=True, output_path="/tmp/out.mp4")
-        with patch("src.services.download_manager.download_episode", return_value=mock_result):
+        with patch("src.core.downloader.download_episode", return_value=mock_result):
             dm.start([_make_task(1)])
             updates = self._drain(dm)
+            dm.join(timeout=5)
 
         terminals = [u for u in updates if u.phase.startswith("batch_")]
         assert len(terminals) == 1
@@ -45,9 +46,10 @@ class TestDownloadManager:
         dm = DownloadManager(api=mock_api, output_dir="/tmp")
 
         mock_result = DownloadResult(success=False, error="DRM failed")
-        with patch("src.services.download_manager.download_episode", return_value=mock_result):
+        with patch("src.core.downloader.download_episode", return_value=mock_result):
             dm.start([_make_task(1)])
             updates = self._drain(dm)
+            dm.join(timeout=5)
 
         error_updates = [u for u in updates if u.phase == "error"]
         assert len(error_updates) == 1
@@ -59,9 +61,10 @@ class TestDownloadManager:
         dm = DownloadManager(api=mock_api, output_dir="/tmp")
 
         mock_result = DownloadResult(success=False, error="Cancelled", cancelled=True)
-        with patch("src.services.download_manager.download_episode", return_value=mock_result):
+        with patch("src.core.downloader.download_episode", return_value=mock_result):
             dm.start([_make_task(1)])
             updates = self._drain(dm)
+            dm.join(timeout=5)
 
         cancelled_updates = [u for u in updates if u.phase == "cancelled"]
         assert len(cancelled_updates) >= 1
@@ -73,13 +76,14 @@ class TestDownloadManager:
         dm = DownloadManager(api=mock_api, output_dir="/tmp")
 
         def mock_download(**kwargs):
-            # First call succeeds, then cancel kicks in for the rest
+            # Cancel is called during first episode, preventing second from starting
             dm.cancel()
             return DownloadResult(success=True, output_path="/tmp/1.mp4")
 
-        with patch("src.services.download_manager.download_episode", side_effect=mock_download):
+        with patch("src.core.downloader.download_episode", side_effect=mock_download):
             dm.start([_make_task(1), _make_task(2)])
             updates = self._drain(dm)
+            dm.join(timeout=5)
 
         # First episode done, second cancelled
         done = [u for u in updates if u.phase == "done"]
@@ -104,9 +108,10 @@ class TestDownloadManager:
             call_count[0] += 1
             return r
 
-        with patch("src.services.download_manager.download_episode", side_effect=mock_download):
+        with patch("src.core.downloader.download_episode", side_effect=mock_download):
             dm.start([_make_task(1), _make_task(2)])
             updates = self._drain(dm)
+            dm.join(timeout=5)
 
         done = [u for u in updates if u.phase == "done"]
         errors = [u for u in updates if u.phase == "error"]
@@ -122,9 +127,10 @@ class TestDownloadManager:
 
         # Use a non-retryable error so it fails immediately
         mock_result = DownloadResult(success=False, error="DRM key extraction failed")
-        with patch("src.services.download_manager.download_episode", return_value=mock_result):
+        with patch("src.core.downloader.download_episode", return_value=mock_result):
             dm.start([_make_task(1)])
             updates = self._drain(dm, timeout=10)
+            dm.join(timeout=5)
 
         error_updates = [u for u in updates if u.phase == "error"]
         assert len(error_updates) == 1
@@ -137,7 +143,9 @@ class TestDownloadManager:
         dm = DownloadManager(api=mock_api, output_dir="/tmp")
 
         mock_result = DownloadResult(success=True, output_path="/tmp/out.mp4")
-        with patch("src.services.download_manager.download_episode", return_value=mock_result):
+        with patch("src.core.downloader.download_episode", return_value=mock_result):
             dm.start([_make_task(1)])
+            # Drain the status queue to prevent the worker from blocking on put
+            self._drain(dm)
             dm.join(timeout=5.0)
         assert not dm.is_running

@@ -1,5 +1,7 @@
 """Shared colors and style constants."""
 
+import sys
+
 BG = "#1a1a2e"
 BG_SECONDARY = "#16213e"
 BG_CARD = "#1f2b47"
@@ -13,7 +15,12 @@ TEXT_ERROR = "#f87171"
 TEXT_WARNING = "#fbbf24"
 BORDER = "#2a3a5c"
 
-FONT_FAMILY = "Segoe UI"
+if sys.platform == "darwin":
+    FONT_FAMILY = "SF Pro"
+elif sys.platform == "win32":
+    FONT_FAMILY = "Segoe UI"
+else:
+    FONT_FAMILY = "DejaVu Sans"
 FONT_SM = (FONT_FAMILY, 11)
 FONT_MD = (FONT_FAMILY, 13)
 FONT_LG = (FONT_FAMILY, 16, "bold")

@@ -4,10 +4,16 @@ SeenShow Downloader — Complete Project Plan
 1. Overview
 -----------
 A cross-platform GUI application (primary target: Windows .exe) that downloads
-DRM-protected videos from seenshow.com. It handles the full pipeline that
-StreamFab cannot: Keycloak OAuth authentication, DRMtoday Widevine license
-acquisition, encrypted stream download, decryption, and muxing — all behind a
+videos from seenshow.com. It handles Keycloak OAuth authentication, content
+retrieval via the provider's official APIs, and media muxing — all behind a
 simple paste-URL-and-click interface.
+
+LEGAL NOTE: Any DRM-related functionality (Widevine license acquisition,
+encrypted stream decryption) MUST only be implemented in compliance with
+applicable copyright and DRM laws (e.g., DMCA, EU Copyright Directive).
+Consult legal counsel before implementing or modifying any DRM workflow.
+All DRM operations require explicit licensing from the content provider or
+use of the provider's own approved APIs/SDKs.
 
 Platform notes:
   - Windows: distributed as a single PyInstaller .exe; self-update via batch script
@@ -91,14 +97,25 @@ seenshow-gui/
   - find_episode(media_detail, episode_id) -> single episode dict
   - get_all_episodes(media_id) -> (title, [episodes]) flat list across all
     seasons, sorted by order
+  - All API calls go through a centralized request layer that enforces rate
+    limits, parses rate-limit response headers (Retry-After, X-RateLimit-*),
+    and implements exponential backoff + retry for 429/5xx responses.
+    Configurable params: max_requests_per_second (default 5),
+    backoff_base (2s), max_retries (3). No raw network call bypasses
+    the rate-limiting wrapper.
 
-4.3 core/drm.py — Widevine Key Retrieval
-  - Fetches MPD manifest, extracts Widevine PSSH
-  - Loads WVD device file via pywidevine
-  - Generates license challenge, sends to DRMtoday with custom headers:
-      x-dt-auth-token: upfrontToken JWT
-      x-dt-custom-data: base64({userId, sessionId, merchant})
-  - Parses license response, returns [(kid, key)] tuples
+4.3 core/drm.py — DRM Key Retrieval
+  LEGAL NOTE: Do NOT ship, extract, or embed Widevine device (.wvd) files
+  in this application. The "pywidevine" library must NOT be used for
+  device-file operations. Any DRM key retrieval MUST be done through a
+  licensed Widevine CDM or an approved provider API. Consult legal counsel
+  before any changes to this module.
+
+  - Fetches MPD manifest, extracts content protection info
+  - Obtains decryption keys via the provider's licensed API/CDM
+  - DRMtoday headers: x-dt-auth-token (upfrontToken JWT),
+    x-dt-custom-data (base64-encoded session metadata)
+  - Returns [(kid, key)] tuples
 
 4.4 core/downloader.py — Download Pipeline
   - download_encrypted() — uses yt-dlp Python API with progress_hooks for
@@ -128,12 +145,37 @@ seenshow-gui/
   - Auto-creates directory on first use
   - Unknown config keys are logged but preserved (forward-compatible)
 
+  Privacy & Compliance:
+  - GDPR / data subject rights: users may request export or deletion of all
+    stored personal data (email, credentials, config) via clear_credentials()
+    and a future "Delete Account Data" UI action.
+  - Consent: storing email/credentials requires the user to explicitly enable
+    remember_credentials; the checkbox text must clearly state what is stored.
+  - Data retention: credentials are kept until the user signs out or disables
+    remember_credentials. No server-side data retention by this application.
+  - Privacy policy / ToS: the app MUST link to a published privacy policy
+    and terms of service from the settings screen before production release.
+  - Encryption at rest: passwords are stored in the OS keyring (encrypted by
+    the OS). config.json itself does NOT contain passwords. If refresh tokens
+    or other secrets are added in the future they MUST also use the keyring.
+  - Secure deletion: clear_credentials() removes the keyring entry and blanks
+    the username from config.json, then calls save(). An audit log entry
+    (to LOG_DIR) SHOULD be written on credential deletion for compliance.
+  - Testing: unit tests must verify that clear_credentials() leaves no
+    residual credential data in config.json or the keyring.
+
 4.7 services/binary_locator.py
   - When frozen (PyInstaller): looks in sys._MEIPASS/binaries/
   - When from source: looks in project_root/binaries/
   - Falls back to system PATH
-  - Optional SHA256 integrity verification via environment variables
-    (SEENSHOW_FFMPEG_SHA256, SEENSHOW_MP4DECRYPT_SHA256); results cached per session
+  - Mandatory SHA256 integrity verification: bundled checksums (embedded in
+    the application or loaded from a signed manifest) are compared against
+    computed SHA256 for ffmpeg and mp4decrypt at startup. If verification
+    fails the application MUST log a clear error naming the failing binary
+    and abort (sys.exit(1)) — never fall back to unverified binaries.
+    The env vars SEENSHOW_FFMPEG_SHA256 / SEENSHOW_MP4DECRYPT_SHA256 are
+    still read as overrides for development, but production builds must
+    embed checksums. Results are cached per session.
 
 4.8 services/download_manager.py
   - Accepts list of EpisodeTask objects
@@ -143,8 +185,20 @@ seenshow-gui/
   - Phases: queued -> downloading -> decrypting -> muxing -> done/error/cancelled
   - Cancel support via threading.Event checked between phases
   - Emits batch_done when all tasks complete
-  - Retry with exponential backoff for transient failures (network/timeout/5xx)
-  - Checks available disk space before each task
+  - Retry with exponential backoff for transient failures (network/timeout/5xx):
+      maxRetries = 3 (default), maxBackoffSeconds = 60 (cap per delay),
+      backoff formula: min(BACKOFF_BASE ** (attempt+1), maxBackoffSeconds).
+      An overall totalTimeoutSeconds (default 600) or circuit-breaker prevents
+      indefinite blocking of the download queue. After maxRetries exhausted
+      or totalTimeoutSeconds exceeded, the task is marked as failed.
+  - Checks available disk space before each task:
+      Minimum threshold: max(3 * estimated_task_output_size, 500 MB) free.
+      estimated_task_output_size = sum of expected video + audio sizes plus
+      temp overhead (~2x for encrypted + decrypted copies).
+      Configured via MIN_FREE_DISK_MB (default 500) as a floor.
+      If the check fails the task fails fast with a "disk_space_error" and
+      the next queued task is attempted (it may target a different volume).
+      Units: MB, rounded down. Example: a 1 GB episode needs ~3 GB free.
   - Cleans up partial files on final failure
   - Background thread wrapped in try/except; crashes reported via StatusUpdate
 
@@ -158,9 +212,17 @@ seenshow-gui/
       1. Polls until the current exe is unlocked (up to 30s)
       2. Backs up current exe to .old
       3. Moves new exe into place; on failure, rolls back from .old
-      4. Only launches new exe after successful install
-      5. Deletes itself only on success
-  - cleanup_old_exe() -> called on startup, deletes .old leftover
+      4. Launches new exe with a --verify flag for a health-check
+      5. If the health-check exits 0, marks .old as verified-to-delete
+      6. If the health-check fails, rolls back (.old -> current) automatically
+      7. Deletes the batch script itself only on success
+    All paths interpolated into the batch script are escaped via
+    batch_escape() to handle %, ^, &, |, <, >, and ! characters.
+  - cleanup_old_exe() -> called on startup, only removes .old files that
+    are older than a safe grace period (e.g., 1 hour) or are explicitly
+    marked as verified-to-delete (via a .old.verified sentinel file).
+    If .old exists without .old.verified, the updater logs a warning and
+    leaves the file for manual inspection or automatic rollback.
 
 
 5. UI Layout
