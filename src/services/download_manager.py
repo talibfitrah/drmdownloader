@@ -8,6 +8,8 @@ import time
 import traceback
 from dataclasses import dataclass
 
+from ..core.downloader import download_episode, cleanup, safe_filename, DownloadResult
+
 logger = logging.getLogger(__name__)
 
 # Retry configuration
@@ -128,7 +130,6 @@ class DownloadManager:
             ))
 
     def _run_tasks(self, tasks: list[EpisodeTask]):
-        from ..core.downloader import download_episode, cleanup
 
         any_cancelled = False
         any_error = False
@@ -208,7 +209,6 @@ class DownloadManager:
 
     def _download_with_retry(self, task, i_task, total, download_fn, progress_cb):
         """Attempt download with exponential backoff for transient failures."""
-        from ..core.downloader import DownloadResult
 
         last_result = None
         for attempt in range(MAX_RETRIES + 1):
@@ -252,7 +252,6 @@ class DownloadManager:
 
     def _cleanup_partial_files(self, task):
         """Remove partial/temp files for a failed task."""
-        from ..core.downloader import safe_filename, cleanup
         from pathlib import Path
 
         try:

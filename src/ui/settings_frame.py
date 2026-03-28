@@ -9,7 +9,10 @@ import customtkinter as ctk
 from . import theme as T
 from .i18n import shape_if_arabic
 from ..core.constants import __version__
-from ..services.updater import UpdateStatus
+from ..services.updater import (
+    UpdateStatus, check_for_update, UpdateCheckResult,
+    download_update, apply_update,
+)
 
 
 class SettingsFrame(tk.Frame):
@@ -146,7 +149,6 @@ class SettingsFrame(tk.Frame):
         threading.Thread(target=self._do_check_update, daemon=True).start()
 
     def _do_check_update(self):
-        from ..services.updater import check_for_update, UpdateCheckResult
         try:
             result = check_for_update()
         except Exception as e:
@@ -184,7 +186,6 @@ class SettingsFrame(tk.Frame):
         ).start()
 
     def _download_and_apply(self, url: str, sha256: str = ""):
-        from ..services.updater import download_update, apply_update
         import sys
 
         try:
@@ -214,7 +215,6 @@ class SettingsFrame(tk.Frame):
             ))
 
     def _confirm_apply(self, new_exe: str):
-        from ..services.updater import apply_update
         if messagebox.askyesno(
             self.i.t("app_title"),
             self.i.t("update_restart_confirm"),

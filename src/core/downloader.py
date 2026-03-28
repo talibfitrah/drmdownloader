@@ -10,6 +10,7 @@ from typing import Callable
 import yt_dlp
 
 from ..services.binary_locator import get_binary
+from .drm import get_widevine_keys
 
 # Progress callback signature: (phase_key: str, pct: float, extra: dict)
 # phase_key is an i18n key; extra may contain speed, eta_secs, etc.
@@ -214,7 +215,6 @@ def download_episode(
     progress_cb receives (phase_key, pct, extra_dict) where phase_key
     is an i18n translation key.
     """
-    from .drm import get_widevine_keys
 
     # Track temp files for cleanup on any failure
     temp_files: list[str] = []

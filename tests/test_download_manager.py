@@ -32,7 +32,7 @@ class TestDownloadManager:
         dm = DownloadManager(api=mock_api, output_dir="/tmp")
 
         mock_result = DownloadResult(success=True, output_path="/tmp/out.mp4")
-        with patch("src.core.downloader.download_episode", return_value=mock_result):
+        with patch("src.services.download_manager.download_episode", return_value=mock_result):
             dm.start([_make_task(1)])
             updates = self._drain(dm)
 
@@ -45,7 +45,7 @@ class TestDownloadManager:
         dm = DownloadManager(api=mock_api, output_dir="/tmp")
 
         mock_result = DownloadResult(success=False, error="DRM failed")
-        with patch("src.core.downloader.download_episode", return_value=mock_result):
+        with patch("src.services.download_manager.download_episode", return_value=mock_result):
             dm.start([_make_task(1)])
             updates = self._drain(dm)
 
@@ -59,7 +59,7 @@ class TestDownloadManager:
         dm = DownloadManager(api=mock_api, output_dir="/tmp")
 
         mock_result = DownloadResult(success=False, error="Cancelled", cancelled=True)
-        with patch("src.core.downloader.download_episode", return_value=mock_result):
+        with patch("src.services.download_manager.download_episode", return_value=mock_result):
             dm.start([_make_task(1)])
             updates = self._drain(dm)
 
@@ -77,7 +77,7 @@ class TestDownloadManager:
             dm.cancel()
             return DownloadResult(success=True, output_path="/tmp/1.mp4")
 
-        with patch("src.core.downloader.download_episode", side_effect=mock_download):
+        with patch("src.services.download_manager.download_episode", side_effect=mock_download):
             dm.start([_make_task(1), _make_task(2)])
             updates = self._drain(dm)
 
@@ -104,7 +104,7 @@ class TestDownloadManager:
             call_count[0] += 1
             return r
 
-        with patch("src.core.downloader.download_episode", side_effect=mock_download):
+        with patch("src.services.download_manager.download_episode", side_effect=mock_download):
             dm.start([_make_task(1), _make_task(2)])
             updates = self._drain(dm)
 
@@ -122,7 +122,7 @@ class TestDownloadManager:
 
         # Use a non-retryable error so it fails immediately
         mock_result = DownloadResult(success=False, error="DRM key extraction failed")
-        with patch("src.core.downloader.download_episode", return_value=mock_result):
+        with patch("src.services.download_manager.download_episode", return_value=mock_result):
             dm.start([_make_task(1)])
             updates = self._drain(dm, timeout=10)
 
@@ -137,7 +137,7 @@ class TestDownloadManager:
         dm = DownloadManager(api=mock_api, output_dir="/tmp")
 
         mock_result = DownloadResult(success=True, output_path="/tmp/out.mp4")
-        with patch("src.core.downloader.download_episode", return_value=mock_result):
+        with patch("src.services.download_manager.download_episode", return_value=mock_result):
             dm.start([_make_task(1)])
             dm.join(timeout=5.0)
         assert not dm.is_running
