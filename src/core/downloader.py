@@ -4,6 +4,7 @@ import os
 import re
 import subprocess
 import threading
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
@@ -254,12 +255,16 @@ def download_episode(
 
         fname = safe_filename(media_title, ep_name)
         Path(output_dir).mkdir(parents=True, exist_ok=True)
-        output_prefix = str(Path(output_dir) / fname)
-        final_output = f"{output_prefix}.mp4"
+        final_output = str(Path(output_dir) / f"{fname}.mp4")
 
         final_path = Path(final_output)
         if final_path.exists() and final_path.stat().st_size > 0:
             return DownloadResult(True, output_path=final_output)
+
+        # Use an ASCII-safe prefix for all intermediate files so that
+        # external tools (mp4decrypt, ffmpeg) work on Windows where the
+        # ANSI codepage may not support Arabic/Unicode in file paths.
+        tmp_prefix = str(Path(output_dir) / uuid.uuid4().hex[:12])
 
         _check_cancel(cancel_check)
 
@@ -281,7 +286,7 @@ def download_episode(
 
             # download_encrypted uses weighted progress: video 0-50%, audio 50-75%
             video_enc, audio_enc = download_encrypted(
-                mpd_url, output_prefix, progress_cb, cancel_check,
+                mpd_url, tmp_prefix, progress_cb, cancel_check,
             )
             temp_files.extend([video_enc, audio_enc])
 
@@ -290,8 +295,8 @@ def download_episode(
             # Decrypt: 75-85%
             if progress_cb:
                 progress_cb("decrypting_video", 0.75, {})
-            video_dec = f"{output_prefix}_video_dec.mp4"
-            audio_dec = f"{output_prefix}_audio_dec.m4a"
+            video_dec = f"{tmp_prefix}_video_dec.mp4"
+            audio_dec = f"{tmp_prefix}_audio_dec.m4a"
             temp_files.extend([video_dec, audio_dec])
 
             decrypt_file(video_enc, video_dec, keys, cancel_check)
@@ -303,13 +308,22 @@ def download_episode(
             # Mux: 90-100%
             if progress_cb:
                 progress_cb("muxing", 0.90, {})
-            mux_output(video_dec, audio_dec, final_output, cancel_check)
+            tmp_muxed = f"{tmp_prefix}_muxed.mp4"
+            temp_files.append(tmp_muxed)
+            mux_output(video_dec, audio_dec, tmp_muxed, cancel_check)
+
+            # Rename to final Arabic filename — Python handles Unicode fine
+            os.replace(tmp_muxed, final_output)
+            temp_files.remove(tmp_muxed)
 
             # Only clean temp files on success
             cleanup(*temp_files)
             temp_files.clear()
         else:
-            # Not DRM protected — download with progress and cancellation
+            # Not DRM protected — download to temp path, then rename
+            tmp_hls = f"{tmp_prefix}_hls.mp4"
+            temp_files.append(tmp_hls)
+
             def hls_hook(d):
                 if cancel_check and cancel_check():
                     raise yt_dlp.utils.DownloadCancelled("Cancelled by user")
@@ -328,7 +342,7 @@ def download_episode(
 
             hls_url = episode.get("fileUrl", mpd_url)
             opts = {
-                "outtmpl": final_output,
+                "outtmpl": tmp_hls,
                 "quiet": True,
                 "fixup": "never",
                 "postprocessors": [],
@@ -339,6 +353,9 @@ def download_episode(
                     ydl.download([hls_url])
             except yt_dlp.utils.DownloadCancelled:
                 raise DownloadCancelled()
+
+            os.replace(tmp_hls, final_output)
+            temp_files.remove(tmp_hls)
 
         return DownloadResult(True, output_path=final_output)
 
