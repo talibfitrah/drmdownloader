@@ -35,7 +35,14 @@ class DownloadResult:
 
 
 def safe_filename(media_title: str, ep_name: str) -> str:
-    name = re.sub(r'[<>:"/\\|?*]', '', f"{media_title} - {ep_name}").strip()
+    # Transliterate Arabic/Unicode to ASCII for max compatibility with
+    # external tools (mp4decrypt, ffmpeg) on Windows
+    try:
+        from unidecode import unidecode
+        name = unidecode(f"{media_title} - {ep_name}")
+    except ImportError:
+        name = f"{media_title} - {ep_name}"
+    name = re.sub(r'[<>:"/\\|?*]', '', name).strip()
     name = re.sub(r'\s+', ' ', name)
     if len(name) > _MAX_FILENAME_LEN:
         name = name[:_MAX_FILENAME_LEN].rstrip()
@@ -74,11 +81,16 @@ def _run_subprocess(cmd: list[str], cancel_check: CancelCheck):
             except subprocess.TimeoutExpired:
                 pass
         if proc.returncode != 0:
-            stderr = proc.stderr.read().decode(errors="replace")
-            raise subprocess.CalledProcessError(proc.returncode, cmd[0], stderr=stderr)
+            stderr = proc.stderr.read().decode(errors="replace").strip()
+            stdout = proc.stdout.read().decode(errors="replace").strip()
+            detail = stderr or stdout or "no output"
+            cmd_name = os.path.basename(cmd[0])
+            raise RuntimeError(
+                f"{cmd_name} failed (exit {proc.returncode}): {detail}"
+            )
     except DownloadCancelled:
         raise
-    except subprocess.CalledProcessError:
+    except RuntimeError:
         raise
     finally:
         if proc.poll() is None:

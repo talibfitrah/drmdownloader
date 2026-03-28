@@ -400,7 +400,10 @@ class DownloadFrame(tk.Frame):
                 if u.phase in ("batch_done", "batch_cancelled", "batch_error"):
                     self._on_batch_finished(u.phase)
                     return
-                self._handle_update(u)
+                try:
+                    self._handle_update(u)
+                except Exception:
+                    pass  # Don't let a UI update error kill the poll loop
         except _q.Empty:
             pass
         self.after(100, self._poll_status)
