@@ -8,9 +8,6 @@ import tempfile
 import threading
 
 import requests
-from pywidevine.cdm import Cdm
-from pywidevine.device import Device
-from pywidevine.pssh import PSSH
 
 from .constants import WIDEVINE_LICENSE_URL
 
@@ -20,23 +17,28 @@ PSSH_PATTERN = re.compile(
 )
 
 # CDM device blob — injected at build time via WVD_BLOB env var.
-# For local development, set WVD_BLOB in your environment.
 _EMBEDDED_WVD = os.environ.get("WVD_BLOB", "")
 
-_device: Device | None = None
+_device = None
 _device_lock = threading.Lock()
 
 
-def _get_device() -> Device:
+def _get_device():
     """Load the embedded CDM device into memory.
 
     Writes to a random temp file, loads the Device, then deletes the
     file immediately so no device material persists on disk.
     Uses double-checked locking for thread safety.
+
+    pywidevine is imported lazily here so the module can be imported
+    by PyInstaller during static analysis without triggering the full
+    pywidevine dependency chain.
     """
     global _device
     if _device is not None:
         return _device
+
+    from pywidevine.device import Device
 
     with _device_lock:
         if _device is not None:
@@ -46,6 +48,7 @@ def _get_device() -> Device:
             raise RuntimeError(
                 "CDM device not configured. Set WVD_BLOB environment variable."
             )
+
         wvd_bytes = base64.b64decode(_EMBEDDED_WVD)
         fd, tmp_path = tempfile.mkstemp(suffix=".wvd")
         try:
@@ -67,7 +70,14 @@ def get_widevine_keys(
     mpd_url: str,
     drm_token: dict,
 ) -> list[tuple[str, str]]:
-    """Get Widevine content keys from DRMtoday license server."""
+    """Get Widevine content keys from DRMtoday license server.
+
+    pywidevine imports are deferred to runtime so this module can be
+    imported during PyInstaller's static analysis phase.
+    """
+    from pywidevine.cdm import Cdm
+    from pywidevine.pssh import PSSH
+
     mpd_content = requests.get(mpd_url, timeout=30).text
 
     pssh_match = PSSH_PATTERN.findall(mpd_content)
