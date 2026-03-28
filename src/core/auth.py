@@ -1,5 +1,6 @@
 """SeenShow Keycloak OAuth PKCE authentication."""
 
+import json
 import re
 from typing import Callable
 
@@ -59,12 +60,8 @@ class SeenAuth:
             login_page = self.session.get(keycloak_url, timeout=30).text
         except requests.RequestException as e:
             raise AuthenticationError(f"Cannot load login page: {e}")
-        match = re.search(r'"loginAction":\s*"([^"]+)"', login_page)
-        if not match:
-            raise AuthenticationError(
-                "Could not find login form. Site layout may have changed."
-            )
-        login_action = match.group(1)
+
+        login_action = self._extract_login_action(login_page)
 
         self._status("auth_signing_in")
         try:
@@ -78,7 +75,12 @@ class SeenAuth:
             raise AuthenticationError(f"Login request failed: {e}")
         if resp.status_code != 302:
             raise AuthenticationError("Invalid email or password.")
-        callback_url = resp.headers["Location"]
+
+        callback_url = resp.headers.get("Location")
+        if not callback_url:
+            raise AuthenticationError(
+                f"Login succeeded (status {resp.status_code}) but no redirect Location header received."
+            )
 
         self._status("auth_completing")
         try:
@@ -101,3 +103,32 @@ class SeenAuth:
 
         self._status("auth_success")
         return self.access_token
+
+    @staticmethod
+    def _extract_login_action(login_page: str) -> str:
+        """Extract the loginAction URL from the Keycloak login page.
+
+        Tries JSON parsing first for safe unescaping, falls back to regex.
+        """
+        # Try to find and parse a JSON block containing loginAction
+        json_match = re.search(r'\{[^{}]*"loginAction"\s*:\s*"[^"]*"[^{}]*\}', login_page)
+        if json_match:
+            try:
+                data = json.loads(json_match.group(0))
+                action = data.get("loginAction")
+                if action:
+                    return action
+            except (json.JSONDecodeError, KeyError):
+                pass
+
+        # Fallback: regex extraction (JSON-unescape the captured value)
+        match = re.search(r'"loginAction":\s*"([^"]+)"', login_page)
+        if match:
+            try:
+                return json.loads(f'"{match.group(1)}"')
+            except (json.JSONDecodeError, ValueError):
+                return match.group(1)
+
+        raise AuthenticationError(
+            "Could not find login form. Site layout may have changed."
+        )

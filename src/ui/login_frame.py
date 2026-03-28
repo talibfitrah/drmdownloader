@@ -86,7 +86,7 @@ class LoginFrame(tk.Frame):
             self.status_label.configure(text=self.i.t("enter_credentials"), fg=T.TEXT_ERROR)
             return
 
-        # MAJOR fix #6: capture Tk state BEFORE spawning thread
+        # Capture Tk state BEFORE spawning thread
         remember = self.remember_var.get()
 
         self.signin_btn.configure(state="disabled", text=self.i.t("signing_in"))
@@ -95,29 +95,48 @@ class LoginFrame(tk.Frame):
             target=self._do_auth, args=(email, pw, remember), daemon=True,
         ).start()
 
+    def _safe_after(self, callback):
+        """Schedule a callback on the main thread, guarding against destroyed widgets."""
+        def guarded():
+            try:
+                if not self.winfo_exists():
+                    return
+                callback()
+            except tk.TclError:
+                pass
+        try:
+            self.after(0, guarded)
+        except tk.TclError:
+            pass
+
     def _do_auth(self, email: str, password: str, remember: bool):
         from ..core.auth import SeenAuth, AuthenticationError
 
         i = self.i
 
         def on_status(key):
-            # Translate the i18n key on the main thread
-            self.after(0, lambda: self.status_label.configure(
+            self._safe_after(lambda: self.status_label.configure(
                 text=i.t(key), fg=T.TEXT_DIM,
             ))
 
         try:
             auth = SeenAuth(email, password, on_status=on_status)
             token = auth.authenticate()
-            # Pass pre-captured `remember` — no Tk access from this thread
-            self.after(0, lambda: self.app.on_login_success(
+            self._safe_after(lambda: self.app.on_login_success(
                 token, email, password, remember,
             ))
         except AuthenticationError as e:
-            self.after(0, lambda: self._show_error(str(e)))
+            msg = str(e)
+            self._safe_after(lambda: self._show_error(msg))
         except Exception as e:
-            self.after(0, lambda: self._show_error(i.t("conn_error", e)))
+            msg = i.t("conn_error", e)
+            self._safe_after(lambda: self._show_error(msg))
 
     def _show_error(self, msg: str):
-        self.signin_btn.configure(state="normal", text=self.i.t("sign_in"))
-        self.status_label.configure(text=msg, fg=T.TEXT_ERROR)
+        try:
+            if not self.winfo_exists():
+                return
+            self.signin_btn.configure(state="normal", text=self.i.t("sign_in"))
+            self.status_label.configure(text=msg, fg=T.TEXT_ERROR)
+        except tk.TclError:
+            pass

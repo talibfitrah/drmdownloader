@@ -15,9 +15,11 @@ import platform
 import shutil
 import subprocess
 import sys
-import urllib.request
+import tempfile
 import zipfile
 from pathlib import Path
+
+import requests
 
 PROJECT_ROOT = Path(__file__).parent.parent
 BINARIES_DIR = PROJECT_ROOT / "binaries"
@@ -27,8 +29,22 @@ BENTO4_URL = "https://www.bok.net/Bento4/binaries/Bento4-SDK-1-6-0-641.x86_64-mi
 
 
 def download_file(url: str, dest: Path):
+    """Download a file with streaming, timeouts, and atomic write."""
     print(f"  Downloading {url}")
-    urllib.request.urlretrieve(url, dest)
+    tmp_fd, tmp_path = tempfile.mkstemp(dir=dest.parent, suffix=".tmp")
+    try:
+        resp = requests.get(url, stream=True, timeout=(30, 300))
+        resp.raise_for_status()
+        with os.fdopen(tmp_fd, "wb") as f:
+            for chunk in resp.iter_content(chunk_size=65536):
+                f.write(chunk)
+        shutil.move(tmp_path, dest)
+    except requests.RequestException as e:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise RuntimeError(f"Download failed for {url}: {e}") from e
 
 
 def ensure_ffmpeg():
@@ -79,7 +95,7 @@ def run_pyinstaller():
         cwd=str(PROJECT_ROOT),
         check=True,
     )
-    print("\n[done] Build complete. Output in dist/SeenShowDL/")
+    print("\n[done] Build complete. Output in dist/SeenShowDL.exe")
 
 
 def main():

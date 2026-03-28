@@ -80,3 +80,20 @@ class TestCheckForUpdate:
         with patch("src.services.updater.requests.get", return_value=mock_resp):
             result = check_for_update()
         assert result.status == UpdateStatus.ERROR
+
+    def test_malformed_asset_skipped(self):
+        """Assets missing name or URL are safely skipped."""
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {
+            "tag_name": "v99.0.0",
+            "assets": [
+                {},  # missing both name and url
+                {"name": "SeenShowDL.exe"},  # missing url
+                {"name": "SeenShowDL.exe", "browser_download_url": "https://example.com/dl.exe"},
+            ],
+        }
+        with patch("src.services.updater.requests.get", return_value=mock_resp):
+            result = check_for_update()
+        assert result.status == UpdateStatus.AVAILABLE
+        assert result.download_url == "https://example.com/dl.exe"

@@ -97,6 +97,20 @@ STRINGS = {
         "update_available": "v{0} available!",
         "up_to_date": "Up to date.",
         "language": "Language",
+
+        # Update flow
+        "select_output_folder": "Select output folder",
+        "update_confirm": "Version {0} is available. Download and install?",
+        "downloading_update": "Downloading...",
+        "update_downloaded_dev": "Downloaded. Restart manually (dev mode).",
+        "update_restart_confirm": "Update downloaded. Restart now to apply?",
+        "update_ready_restart": "Update ready. Restart to apply.",
+        "download_failed": "Download failed: {0}",
+
+        # Retry / errors
+        "retrying": "Retrying ({0}/{1})...",
+        "disk_space_error": "Not enough disk space.",
+        "download_error": "Download error",
     },
 
     "ar": {
@@ -171,6 +185,20 @@ STRINGS = {
         "update_available": "الإصدار {0} متاح!",
         "up_to_date": "محدّث.",
         "language": "اللغة",
+
+        # Update flow
+        "select_output_folder": "اختر مجلد التحميل",
+        "update_confirm": "الإصدار {0} متاح. هل تريد التحميل والتثبيت؟",
+        "downloading_update": "جارٍ التحميل...",
+        "update_downloaded_dev": "تم التحميل. أعد التشغيل يدوياً (وضع التطوير).",
+        "update_restart_confirm": "تم تحميل التحديث. هل تريد إعادة التشغيل الآن؟",
+        "update_ready_restart": "التحديث جاهز. أعد التشغيل للتطبيق.",
+        "download_failed": "فشل التحميل: {0}",
+
+        # Retry / errors
+        "retrying": "إعادة المحاولة ({0}/{1})...",
+        "disk_space_error": "مساحة القرص غير كافية.",
+        "download_error": "خطأ في التحميل",
     },
 }
 

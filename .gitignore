@@ -29,7 +29,8 @@ binaries/*.zip
 
 # PyInstaller
 *.manifest
-*.log
+build/*.log
+dist/*.log
 
 # Config (user-specific, lives in %APPDATA%)
 config.json
@@ -40,4 +41,5 @@ config.json
 # Temp files
 *.tmp
 *.bak
-*.png
+tmp_*.png
+screenshot_*.png

@@ -40,3 +40,15 @@ class TestParseSeenshowUrl:
     def test_no_media_id_raises(self):
         with pytest.raises(ValueError, match="Invalid URL"):
             parse_seenshow_url("https://seenshow.com/media/")
+
+    def test_wrong_domain_raises(self):
+        with pytest.raises(ValueError, match="Invalid URL"):
+            parse_seenshow_url("https://evil.com/media/1234")
+
+    def test_www_subdomain_accepted(self):
+        r = parse_seenshow_url("https://www.seenshow.com/media/1976")
+        assert r == ParsedURL("series", 1976, None)
+
+    def test_settings_subpath_not_matched_as_series(self):
+        with pytest.raises(ValueError, match="Invalid URL"):
+            parse_seenshow_url("https://seenshow.com/media/1234/settings")

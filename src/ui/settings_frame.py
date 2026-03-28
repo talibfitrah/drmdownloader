@@ -123,7 +123,7 @@ class SettingsFrame(tk.Frame):
         ).pack(fill="x", padx=padx, pady=(pady, 0))
 
     def _browse_output(self):
-        d = filedialog.askdirectory(title="Select output folder")
+        d = filedialog.askdirectory(title=self.i.t("select_output_folder"))
         if d:
             self.output_var.set(d)
 
@@ -138,7 +138,7 @@ class SettingsFrame(tk.Frame):
     def _on_lang_change(self, value):
         self.app.set_language(value)
 
-    # ── Update flow (MAJOR fix #5) ──
+    # ── Update flow ──
 
     def _check_update(self):
         self.update_btn.configure(state="disabled", text=self.i.t("checking"))
@@ -146,8 +146,13 @@ class SettingsFrame(tk.Frame):
         threading.Thread(target=self._do_check_update, daemon=True).start()
 
     def _do_check_update(self):
-        from ..services.updater import check_for_update
-        result = check_for_update()
+        from ..services.updater import check_for_update, UpdateCheckResult
+        try:
+            result = check_for_update()
+        except Exception as e:
+            result = UpdateCheckResult(
+                UpdateStatus.ERROR, error_message=str(e),
+            )
         self.after(0, lambda: self._handle_update_result(result))
 
     def _handle_update_result(self, result):
@@ -158,28 +163,27 @@ class SettingsFrame(tk.Frame):
                 text=self.i.t("update_available", result.latest_version),
                 fg=T.TEXT_SUCCESS,
             )
-            # Ask user to confirm
             if messagebox.askyesno(
                 self.i.t("app_title"),
-                f"Version {result.latest_version} is available. Download and install?",
+                self.i.t("update_confirm", result.latest_version),
             ):
-                self._do_download_update(result.download_url)
+                self._do_download_update(result.download_url, result.sha256)
         elif result.status == UpdateStatus.UP_TO_DATE:
             self.update_label.configure(text=self.i.t("up_to_date"), fg=T.TEXT_DIM)
             self.after(3000, lambda: self.update_label.configure(text=""))
         elif result.status == UpdateStatus.ERROR:
             self.update_label.configure(
-                text=result.error_message or "Update check failed",
+                text=result.error_message or self.i.t("error"),
                 fg=T.TEXT_ERROR,
             )
 
-    def _do_download_update(self, url: str):
-        self.update_btn.configure(state="disabled", text="Downloading...")
+    def _do_download_update(self, url: str, sha256: str = ""):
+        self.update_btn.configure(state="disabled", text=self.i.t("downloading_update"))
         threading.Thread(
-            target=self._download_and_apply, args=(url,), daemon=True,
+            target=self._download_and_apply, args=(url, sha256), daemon=True,
         ).start()
 
-    def _download_and_apply(self, url: str):
+    def _download_and_apply(self, url: str, sha256: str = ""):
         from ..services.updater import download_update, apply_update
         import sys
 
@@ -189,20 +193,21 @@ class SettingsFrame(tk.Frame):
                     text=f"{int(pct * 100)}%", fg=T.TEXT_DIM,
                 ))
 
-            new_exe = download_update(url, progress)
+            new_exe = download_update(url, expected_sha256=sha256, progress_cb=progress)
 
             if getattr(sys, "frozen", False):
                 self.after(0, lambda: self._confirm_apply(new_exe))
             else:
                 self.after(0, lambda: self.update_label.configure(
-                    text="Downloaded. Restart manually (dev mode).", fg=T.TEXT_SUCCESS,
+                    text=self.i.t("update_downloaded_dev"), fg=T.TEXT_SUCCESS,
                 ))
                 self.after(0, lambda: self.update_btn.configure(
                     state="normal", text=self.i.t("check_updates"),
                 ))
         except Exception as e:
+            msg = self.i.t("download_failed", e)
             self.after(0, lambda: self.update_label.configure(
-                text=f"Download failed: {e}", fg=T.TEXT_ERROR,
+                text=msg, fg=T.TEXT_ERROR,
             ))
             self.after(0, lambda: self.update_btn.configure(
                 state="normal", text=self.i.t("check_updates"),
@@ -212,9 +217,11 @@ class SettingsFrame(tk.Frame):
         from ..services.updater import apply_update
         if messagebox.askyesno(
             self.i.t("app_title"),
-            "Update downloaded. Restart now to apply?",
+            self.i.t("update_restart_confirm"),
         ):
             apply_update(new_exe)
         else:
-            self.update_label.configure(text="Update ready. Restart to apply.", fg=T.TEXT_SUCCESS)
+            self.update_label.configure(
+                text=self.i.t("update_ready_restart"), fg=T.TEXT_SUCCESS,
+            )
             self.update_btn.configure(state="normal", text=self.i.t("check_updates"))

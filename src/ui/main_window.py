@@ -1,3 +1,4 @@
+import logging
 import tkinter as tk
 
 import customtkinter as ctk
@@ -7,6 +8,8 @@ from .login_frame import LoginFrame
 from .download_frame import DownloadFrame
 from .settings_frame import SettingsFrame
 from ..core.constants import __version__
+
+logger = logging.getLogger(__name__)
 
 
 class MainWindow(ctk.CTk):
@@ -47,6 +50,22 @@ class MainWindow(ctk.CTk):
         self.frames["settings"] = SettingsFrame(self.container, app)
 
         self._current_frame: str | None = None
+
+        # Handle window close — cancel downloads and clean up threads
+        self.protocol("WM_DELETE_WINDOW", self._on_closing)
+
+    def _on_closing(self):
+        """Clean shutdown: cancel downloads, wait for threads, then destroy."""
+        try:
+            dl_frame = self.frames.get("download")
+            dm = getattr(dl_frame, "_dm", None) if dl_frame else None
+            if dm and dm.is_running:
+                dm.cancel()
+                dm.join(timeout=5.0)
+        except Exception:
+            logger.warning("Error during shutdown cleanup", exc_info=True)
+        finally:
+            self.destroy()
 
     def _build_header(self):
         if hasattr(self, "header") and self.header.winfo_exists():
@@ -97,6 +116,10 @@ class MainWindow(ctk.CTk):
             self.show_frame(current)
 
     def show_frame(self, name: str):
+        if name not in self.frames:
+            logger.error("Invalid frame name: %r (available: %s)", name, list(self.frames))
+            return
+
         if self._current_frame == name:
             return
         if self._current_frame and self._current_frame in self.frames:

@@ -6,3 +6,4 @@ packaging>=23.0
 arabic_reshaper>=3.0.0
 python-bidi>=0.6.0
 pyinstaller>=6.0.0
+keyring>=25.0.0

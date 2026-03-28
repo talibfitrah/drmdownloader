@@ -16,6 +16,7 @@ class App:
         self.config = Config()
         self.access_token: str | None = None
         self._api: SeenAPI | None = None
+        self._current_user_email: str | None = None
 
         saved_lang = self.config.get("language", "en")
         self.i18n = I18n(saved_lang)
@@ -31,10 +32,12 @@ class App:
     def show_frame(self, name: str):
         self.window.show_frame(name)
         if name == "settings":
-            user, _ = self.config.get_credentials()
+            display_email = self._current_user_email
+            if not display_email:
+                display_email, _ = self.config.get_credentials()
             sf = self.window.frames["settings"]
             sf.account_label.configure(
-                text=user or self.i18n.t("not_signed_in"),
+                text=display_email or self.i18n.t("not_signed_in"),
             )
             sf.output_var.set(self.config.get("output_dir", ""))
 
@@ -46,6 +49,7 @@ class App:
     def on_login_success(self, token: str, email: str, password: str, remember: bool):
         self.access_token = token
         self._api = SeenAPI(token)
+        self._current_user_email = email
         if remember:
             self.config.save_credentials(email, password)
             self.config.set("remember_credentials", True)
@@ -55,7 +59,7 @@ class App:
         self.show_frame("download")
 
     def sign_out(self):
-        """Full session cleanup — MAJOR fix #4."""
+        """Full session cleanup."""
         # Cancel any running downloads
         dl_frame = self.window.frames.get("download")
         if dl_frame:
@@ -64,6 +68,7 @@ class App:
         # Clear auth state
         self.access_token = None
         self._api = None
+        self._current_user_email = None
         self.config.clear_credentials()
 
         self.show_frame("login")

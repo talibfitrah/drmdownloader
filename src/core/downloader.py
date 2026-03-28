@@ -18,6 +18,9 @@ CancelCheck = Callable[[], bool] | None
 
 _NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
+# Maximum filename length (excluding extension) to avoid OS limits
+_MAX_FILENAME_LEN = 200
+
 
 class DownloadCancelled(Exception):
     pass
@@ -33,7 +36,10 @@ class DownloadResult:
 
 def safe_filename(media_title: str, ep_name: str) -> str:
     name = re.sub(r'[<>:"/\\|?*]', '', f"{media_title} - {ep_name}").strip()
-    return re.sub(r'\s+', ' ', name)
+    name = re.sub(r'\s+', ' ', name)
+    if len(name) > _MAX_FILENAME_LEN:
+        name = name[:_MAX_FILENAME_LEN].rstrip()
+    return name
 
 
 def _check_cancel(cancel_check: CancelCheck):
@@ -42,7 +48,13 @@ def _check_cancel(cancel_check: CancelCheck):
 
 
 def _run_subprocess(cmd: list[str], cancel_check: CancelCheck):
-    """Run a subprocess with cancellation support via Popen + polling."""
+    """Run a subprocess with cancellation support via Popen + polling.
+
+    NOTE: mp4decrypt requires DRM keys on the command line (--key kid:key).
+    The tool does not support key files or stdin for key input. Keys will be
+    visible in the process list while the subprocess runs. This is a known
+    limitation of the mp4decrypt CLI interface.
+    """
     proc = subprocess.Popen(
         cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         creationflags=_NO_WINDOW,
@@ -63,7 +75,7 @@ def _run_subprocess(cmd: list[str], cancel_check: CancelCheck):
                 pass
         if proc.returncode != 0:
             stderr = proc.stderr.read().decode(errors="replace")
-            raise subprocess.CalledProcessError(proc.returncode, cmd, stderr=stderr)
+            raise subprocess.CalledProcessError(proc.returncode, cmd[0], stderr=stderr)
     except DownloadCancelled:
         raise
     except subprocess.CalledProcessError:
@@ -116,7 +128,6 @@ def download_encrypted(
             "format": fmt,
             "allow_unplayable_formats": True,
             "outtmpl": out_path,
-            "nocheckcertificate": True,
             "overwrites": True,
             "nopart": True,
             "fixup": "never",
@@ -140,7 +151,12 @@ def decrypt_file(
     keys: list[tuple[str, str]],
     cancel_check: CancelCheck = None,
 ):
-    """Decrypt a file using mp4decrypt with cancellation support."""
+    """Decrypt a file using mp4decrypt with cancellation support.
+
+    NOTE: mp4decrypt only accepts keys via command-line arguments.
+    There is no keyfile or stdin mode available. Keys are briefly
+    visible in the process list while mp4decrypt runs.
+    """
     mp4decrypt = get_binary("mp4decrypt")
     cmd = [mp4decrypt]
     for kid, key in keys:
@@ -261,16 +277,36 @@ def download_episode(
             cleanup(*temp_files)
             temp_files.clear()
         else:
-            # Not DRM protected
+            # Not DRM protected — download with progress and cancellation
+            def hls_hook(d):
+                if cancel_check and cancel_check():
+                    raise yt_dlp.utils.DownloadCancelled("Cancelled by user")
+                if d["status"] == "downloading" and progress_cb:
+                    total = d.get("total_bytes") or d.get("total_bytes_estimate", 0)
+                    dl = d.get("downloaded_bytes", 0)
+                    raw_pct = (dl / total) if total > 0 else 0
+                    speed = d.get("speed") or 0
+                    eta_secs = 0
+                    if speed > 0 and total > 0:
+                        eta_secs = int((total - dl) / speed)
+                    progress_cb("downloading_video", raw_pct, {
+                        "speed": speed,
+                        "eta_secs": eta_secs,
+                    })
+
             hls_url = episode.get("fileUrl", mpd_url)
             opts = {
                 "outtmpl": final_output,
                 "quiet": True,
                 "fixup": "never",
                 "postprocessors": [],
+                "progress_hooks": [hls_hook],
             }
-            with yt_dlp.YoutubeDL(opts) as ydl:
-                ydl.download([hls_url])
+            try:
+                with yt_dlp.YoutubeDL(opts) as ydl:
+                    ydl.download([hls_url])
+            except yt_dlp.utils.DownloadCancelled:
+                raise DownloadCancelled()
 
         return DownloadResult(True, output_path=final_output)
 

@@ -3,11 +3,16 @@ SeenShow Downloader — Complete Project Plan
 
 1. Overview
 -----------
-A standalone Windows .exe GUI application that downloads DRM-protected videos
-from seenshow.com. It handles the full pipeline that StreamFab cannot: Keycloak
-OAuth authentication, DRMtoday Widevine license acquisition, encrypted stream
-download, decryption, and muxing — all behind a simple paste-URL-and-click
-interface.
+A cross-platform GUI application (primary target: Windows .exe) that downloads
+DRM-protected videos from seenshow.com. It handles the full pipeline that
+StreamFab cannot: Keycloak OAuth authentication, DRMtoday Widevine license
+acquisition, encrypted stream download, decryption, and muxing — all behind a
+simple paste-URL-and-click interface.
+
+Platform notes:
+  - Windows: distributed as a single PyInstaller .exe; self-update via batch script
+  - Linux:   run from source (python run.py); config in ~/.config/SeenShowDL/
+  - macOS:   run from source; code-signing & notarization not yet implemented
 
 
 2. Tech Stack
@@ -115,16 +120,20 @@ seenshow-gui/
 
 4.6 services/config.py
   - Stores config in %APPDATA%/SeenShowDL/config.json
-    (Linux: ~/.config/SeenShowDL/)
-    output_dir, auto_update, last_update_check
+    (Linux: ~/.config/SeenShowDL/; macOS: ~/.config/SeenShowDL/)
+    output_dir, language, remember_credentials
   - Credential helpers: save_credentials(), get_credentials(), clear_credentials()
-  - Password stored as base64 (casual protection — tied to user's own machine)
+  - Password stored in OS keyring (Windows Credential Manager / Secret Service)
+    via the keyring library — not in the JSON config file
   - Auto-creates directory on first use
+  - Unknown config keys are logged but preserved (forward-compatible)
 
 4.7 services/binary_locator.py
   - When frozen (PyInstaller): looks in sys._MEIPASS/binaries/
   - When from source: looks in project_root/binaries/
   - Falls back to system PATH
+  - Optional SHA256 integrity verification via environment variables
+    (SEENSHOW_FFMPEG_SHA256, SEENSHOW_MP4DECRYPT_SHA256); results cached per session
 
 4.8 services/download_manager.py
   - Accepts list of EpisodeTask objects
@@ -134,17 +143,23 @@ seenshow-gui/
   - Phases: queued -> downloading -> decrypting -> muxing -> done/error/cancelled
   - Cancel support via threading.Event checked between phases
   - Emits batch_done when all tasks complete
+  - Retry with exponential backoff for transient failures (network/timeout/5xx)
+  - Checks available disk space before each task
+  - Cleans up partial files on final failure
+  - Background thread wrapped in try/except; crashes reported via StatusUpdate
 
 4.9 services/updater.py
   - check_for_update() -> queries api.github.com/repos/{repo}/releases/latest,
-    compares version tags
-  - download_update(url) -> streams exe to %TEMP% with progress callback
-  - apply_update(new_exe) -> writes a batch script that:
-      1. Waits 2s for current process to exit
-      2. Renames current exe to .old
-      3. Moves new exe into place
-      4. Launches new exe
-      5. Deletes itself
+    compares version tags; fetches optional .sha256 checksum file from release
+  - download_update(url, expected_sha256) -> streams exe to %TEMP% with progress
+    callback; computes SHA256 of downloaded file and verifies against expected
+    hash if provided; aborts on mismatch
+  - apply_update(new_exe) -> verifies new_exe exists, writes a batch script that:
+      1. Polls until the current exe is unlocked (up to 30s)
+      2. Backs up current exe to .old
+      3. Moves new exe into place; on failure, rolls back from .old
+      4. Only launches new exe after successful install
+      5. Deletes itself only on success
   - cleanup_old_exe() -> called on startup, deletes .old leftover
 
 
@@ -263,16 +278,18 @@ User data in %APPDATA% is never touched by updates.
 
 8. Data Persistence
 -------------------
-%APPDATA%/SeenShowDL/
-└── config.json
-    {
-      "username": "user@example.com",
-      "password_b64": "base64...",
-      "remember_credentials": true,
-      "output_dir": "C:\\Users\\...\\Downloads\\SeenShow",
-      "auto_update": true,
-      "last_update_check": "2026-03-27"
-    }
+%APPDATA%/SeenShowDL/ (Windows)
+~/.config/SeenShowDL/ (Linux/macOS)
+├── config.json
+│   {
+│     "username": "user@example.com",
+│     "remember_credentials": true,
+│     "output_dir": "C:\\Users\\...\\Downloads\\SeenShow",
+│     "language": "en"
+│   }
+└── *.wvd              (Widevine CDM device file, user-provided)
+
+Password is stored in the OS keyring (not in config.json).
 
 
 9. Build Pipeline
@@ -319,11 +336,19 @@ From source (dev/testing):
 
     cd seenshow-gui
     python -m venv venv
-    venv\Scripts\pip install -r requirements.txt     # Windows
-    ./venv/bin/pip install -r requirements.txt        # Linux
+
+    # Windows
+    venv\Scripts\pip install -r requirements.txt
     python run.py
 
-As built exe (end user):
+    # Linux / macOS
+    ./venv/bin/pip install -r requirements.txt
+    python run.py
+
+As built exe (Windows end user):
   1. Double-click SeenShowDL.exe
   2. Sign in with SeenShow credentials
-  4. Paste URL -> Fetch -> Download Selected
+  3. Paste URL -> Fetch -> Download Selected
+
+Note: A Widevine CDM device (.wvd) file is required. Place it in the
+app data directory or set the SEENSHOW_WVD_B64 environment variable.

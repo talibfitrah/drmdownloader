@@ -1,4 +1,4 @@
-"""Tests for download manager — terminal states, cancellation."""
+"""Tests for download manager — terminal states, cancellation, retry."""
 
 import queue
 import time
@@ -114,3 +114,30 @@ class TestDownloadManager:
         assert len(errors) == 1
         terminals = [u for u in updates if u.phase.startswith("batch_")]
         assert terminals[0].phase == "batch_error"
+
+    def test_error_update_has_translated_message(self):
+        """Error StatusUpdate should have a translated message, not raw error."""
+        mock_api = MagicMock()
+        dm = DownloadManager(api=mock_api, output_dir="/tmp")
+
+        # Use a non-retryable error so it fails immediately
+        mock_result = DownloadResult(success=False, error="DRM key extraction failed")
+        with patch("src.core.downloader.download_episode", return_value=mock_result):
+            dm.start([_make_task(1)])
+            updates = self._drain(dm, timeout=10)
+
+        error_updates = [u for u in updates if u.phase == "error"]
+        assert len(error_updates) == 1
+        # message should be the key name (no i18n configured), error should be raw
+        assert error_updates[0].error == "DRM key extraction failed"
+        assert error_updates[0].message == "download_error"
+
+    def test_join_waits_for_thread(self):
+        mock_api = MagicMock()
+        dm = DownloadManager(api=mock_api, output_dir="/tmp")
+
+        mock_result = DownloadResult(success=True, output_path="/tmp/out.mp4")
+        with patch("src.core.downloader.download_episode", return_value=mock_result):
+            dm.start([_make_task(1)])
+            dm.join(timeout=5.0)
+        assert not dm.is_running
