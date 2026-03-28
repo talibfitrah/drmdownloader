@@ -65,7 +65,7 @@ jobs:
         shell: python
         run: |
           import os, sys
-          blob = os.environ.get("WVD_BLOB", "")
+          blob = os.environ.get("WVD_BLOB", "").replace("\n", "").replace("\r", "").strip()
           if not blob:
               print("ERROR: WVD_BLOB secret is empty or missing.")
               sys.exit(1)
