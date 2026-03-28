@@ -313,6 +313,10 @@ def download_episode(
     except DownloadCancelled:
         return DownloadResult(False, error="Cancelled", cancelled=True)
     except Exception as e:
+        import logging
+        logging.getLogger("seenshow.downloader").error(
+            f"Download failed for episode {episode_id}: {e}", exc_info=True
+        )
         return DownloadResult(False, error=str(e))
     finally:
         # Always clean temp files on failure/cancel (but not the final output)
